@@ -1,10 +1,10 @@
 # Ask Atin: backend
 
-A small Flask API behind the **Ask Atin** chatbot on my portfolio. Visitors type questions about me on a GitHub Pages page; this backend forwards them to the Claude API with a system prompt built from [`persona.md`](persona.md) and returns the answer as JSON.
+A small Flask API behind the **Ask Atin** chatbot on my portfolio. Visitors type questions about me on a GitHub Pages page; this backend forwards them to the OpenAI API with a system prompt built from [`persona.md`](persona.md) and returns the answer as JSON.
 
 - **Live backend:** https://ask-atin-backend.onrender.com  <!-- TODO: replace with the real Render URL -->
 - **Frontend:** https://atinm12.github.io/ask-atin.html  <!-- TODO: confirm path once added to the portfolio -->
-- **Stack:** Python 3.10+, Flask, flask-cors, Anthropic Python SDK, gunicorn, Render (free tier)
+- **Stack:** Python 3.10+, Flask, flask-cors, OpenAI Python SDK, gunicorn, Render (free tier)
 
 ## Endpoints
 
@@ -19,7 +19,7 @@ Liveness check. The frontend calls it on page load to wake the Render instance (
 
 ### `POST /chat`
 
-Sends a visitor's question (and optionally the conversation so far) to Claude.
+Sends a visitor's question (and optionally the conversation so far) to OpenAI's Chat Completions API.
 
 **Request body** (`Content-Type: application/json`):
 
@@ -40,9 +40,9 @@ History handling: invalid items (wrong role, missing or empty content, non-objec
 | 404 / 405 | Unknown path, or wrong HTTP method (e.g. `GET /chat`) |
 | 413 | Request body over 64 KB |
 | 429 | More than 15 `/chat` requests from one IP in 60 seconds (in-memory limiter) |
-| 500 | Server is missing `ANTHROPIC_API_KEY`, or an unexpected server error |
-| 502 | Claude API returned an error (e.g. bad key, invalid request) or an empty reply |
-| 503 | Claude API is unreachable, timed out, rate-limited, or overloaded |
+| 500 | Server is missing `OPENAI_API_KEY`, or an unexpected server error |
+| 502 | OpenAI API returned an error (e.g. bad key, account out of credits, invalid request) or an empty reply |
+| 503 | OpenAI API is unreachable, timed out, rate-limited, or overloaded |
 
 Example:
 
@@ -52,7 +52,7 @@ curl -X POST https://ask-atin-backend.onrender.com/chat \
   -d '{"message": "What projects has Atin built?", "history": []}'
 ```
 
-Model: `ANTHROPIC_MODEL` env var (default `claude-haiku-4-5-20251001`), `max_tokens` 400.
+Model: `OPENAI_MODEL` env var (default `gpt-4.1-mini`), `max_completion_tokens` 400. The system prompt (fixed guardrails plus `persona.md`) is sent as the first `system` message.
 
 ## How the frontend talks to the backend
 
@@ -87,8 +87,8 @@ Environment variables (put them in `.env` locally; `python-dotenv` loads it):
 
 | Variable | Required | Default |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | none |
-| `ANTHROPIC_MODEL` | no | `claude-haiku-4-5-20251001` |
+| `OPENAI_API_KEY` | yes | none |
+| `OPENAI_MODEL` | no | `gpt-4.1-mini` |
 | `ALLOWED_ORIGINS` | no | `https://atinm12.github.io,http://localhost:5500,http://127.0.0.1:5500` (comma-separated) |
 | `PORT` | no | `5001` locally (Render sets its own) |
 
@@ -99,7 +99,7 @@ Test the frontend against the local backend:
 3. Open http://localhost:5500/ask-atin.html
 4. Set `API_BASE` back to the Render URL before committing.
 
-Run the tests (the Claude API is mocked, so no key or network is needed):
+Run the tests (the OpenAI client is mocked, so no key or network is needed):
 
 ```bash
 pytest -q
@@ -107,24 +107,24 @@ pytest -q
 
 ## Deployment (Render)
 
-`render.yaml` describes the service. Build command: `pip install -r requirements.txt`. Start command: `gunicorn app:app`. `gunicorn.conf.py` is picked up automatically: it binds to Render's `$PORT`, uses one worker (the rate limiter lives in memory), and sets a 120 s timeout so slow Claude calls aren't killed mid-request.
+`render.yaml` describes the service. Build command: `pip install -r requirements.txt`. Start command: `gunicorn app:app`. `gunicorn.conf.py` is picked up automatically: it binds to Render's `$PORT`, uses one worker (the rate limiter lives in memory), and sets a 120 s timeout so slow OpenAI calls aren't killed mid-request.
 
 ## How secrets are handled
 
-- The Anthropic API key exists **only** in environment variables: in `.env` locally and in Render's **Environment** settings in production.
+- The OpenAI API key exists **only** in environment variables: in `.env` locally and in Render's **Environment** settings in production.
 - `.env` is listed in `.gitignore` and has never been committed. Only `.env.example`, which has a placeholder value, is in the repo.
-- The frontend never sees the key. It only talks to this backend, which adds the key server-side when calling Anthropic.
+- The frontend never sees the key. It only talks to this backend, which adds the key server-side when calling OpenAI.
 - The key is never logged. Error logs record only the exception type or HTTP status.
-- Before each commit I run `git status` to confirm `.env` isn't staged, and I grep the staged files for `sk-ant`.
+- Before each commit I run `git status` to confirm `.env` isn't staged, and I grep the staged files for `sk-` key patterns.
 - Abuse limits: CORS allow-list, 1000-character message cap, 64 KB body cap, 10-item history cap, 400 `max_tokens`, and a per-IP rate limit of 15 requests per minute.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `app.py` | Flask app: routes, validation, rate limiting, CORS, Claude call |
+| `app.py` | Flask app: routes, validation, rate limiting, CORS, OpenAI call |
 | `persona.md` | Facts about me, used as the system prompt |
-| `test_app.py` | pytest suite (Anthropic client mocked) |
+| `test_app.py` | pytest suite (OpenAI client mocked) |
 | `ask-atin.html` | Frontend; a copy lives in my GitHub Pages repo |
 | `requirements.txt` / `requirements-dev.txt` | Runtime and test dependencies |
 | `render.yaml`, `gunicorn.conf.py` | Deployment config |

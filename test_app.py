@@ -1,30 +1,37 @@
-"""Tests for app.py. The Anthropic client is always mocked; no network calls are made."""
+"""Tests for app.py. The OpenAI client is always mocked; no network calls are made."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import anthropic
-import httpx2 as httpx  # the HTTP library the anthropic SDK builds its exceptions on
+import httpx2 as httpx  # the HTTP library the openai SDK builds its exceptions on
+import openai
 import pytest
 
 import app as app_module
 
 
 def fake_response(text="Hi, I'm Atin's bot."):
-    return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+
+def sent_messages(mock_client):
+    """Messages passed to OpenAI, minus the leading system prompt."""
+    messages = mock_client.chat.completions.create.call_args.kwargs["messages"]
+    assert messages[0] == {"role": "system", "content": app_module.SYSTEM_PROMPT}
+    return messages[1:]
 
 
 @pytest.fixture
 def mock_client(monkeypatch):
     client = MagicMock()
-    client.messages.create.return_value = fake_response()
+    client.chat.completions.create.return_value = fake_response()
     monkeypatch.setattr(app_module, "get_client", lambda: client)
     return client
 
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
     app_module._hits.clear()
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as c:
@@ -42,7 +49,7 @@ def test_empty_or_invalid_message(client, mock_client, body):
     r = client.post("/chat", json=body)
     assert r.status_code == 400
     assert "error" in r.get_json()
-    mock_client.messages.create.assert_not_called()
+    mock_client.chat.completions.create.assert_not_called()
 
 
 def test_non_json_body(client, mock_client):
@@ -61,7 +68,7 @@ def test_message_too_long(client, mock_client):
     r = client.post("/chat", json={"message": "a" * 1001})
     assert r.status_code == 400
     assert "too long" in r.get_json()["error"]
-    mock_client.messages.create.assert_not_called()
+    mock_client.chat.completions.create.assert_not_called()
 
 
 def test_message_at_limit_ok(client, mock_client):
@@ -81,22 +88,21 @@ def test_405(client):
 
 
 def test_missing_api_key(client, mock_client, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.delenv("OPENAI_API_KEY")
     r = client.post("/chat", json={"message": "hi"})
     assert r.status_code == 500
     assert "API key" in r.get_json()["error"]
-    mock_client.messages.create.assert_not_called()
+    mock_client.chat.completions.create.assert_not_called()
 
 
 def test_success(client, mock_client):
     r = client.post("/chat", json={"message": "  What does Atin study?  "})
     assert r.status_code == 200
     assert r.get_json() == {"reply": "Hi, I'm Atin's bot."}
-    kwargs = mock_client.messages.create.call_args.kwargs
+    kwargs = mock_client.chat.completions.create.call_args.kwargs
     assert kwargs["model"] == app_module.MODEL
-    assert kwargs["max_tokens"] == 400
-    assert kwargs["system"] == app_module.SYSTEM_PROMPT
-    assert kwargs["messages"] == [{"role": "user", "content": "What does Atin study?"}]
+    assert kwargs["max_completion_tokens"] == 400
+    assert sent_messages(mock_client) == [{"role": "user", "content": "What does Atin study?"}]
 
 
 def test_history_cleaning(client, mock_client):
@@ -112,7 +118,7 @@ def test_history_cleaning(client, mock_client):
         history.append({"role": "user" if i % 2 == 0 else "assistant", "content": f"turn {i}"})
     r = client.post("/chat", json={"message": "latest", "history": history})
     assert r.status_code == 200
-    sent = mock_client.messages.create.call_args.kwargs["messages"]
+    sent = sent_messages(mock_client)
     # Last 10 valid items are turns 2..11 (starts with user turn 2), plus the new message.
     assert sent[0] == {"role": "user", "content": "turn 2"}
     assert [m["content"] for m in sent[:-1]] == [f"turn {i}" for i in range(2, 12)]
@@ -124,7 +130,7 @@ def test_history_leading_assistant_dropped(client, mock_client):
     # 11 valid items starting with user -> last 10 start with an assistant turn, which gets dropped.
     history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"t{i}"} for i in range(11)]
     client.post("/chat", json={"message": "q", "history": history})
-    sent = mock_client.messages.create.call_args.kwargs["messages"]
+    sent = sent_messages(mock_client)
     assert sent[0]["role"] == "user"
     assert sent[0]["content"] == "t2"
 
@@ -132,7 +138,7 @@ def test_history_leading_assistant_dropped(client, mock_client):
 def test_history_not_a_list(client, mock_client):
     r = client.post("/chat", json={"message": "q", "history": "oops"})
     assert r.status_code == 200
-    assert mock_client.messages.create.call_args.kwargs["messages"] == [{"role": "user", "content": "q"}]
+    assert sent_messages(mock_client) == [{"role": "user", "content": "q"}]
 
 
 def test_cors_allowed_origin(client):
@@ -178,31 +184,32 @@ def test_rate_limit_window_expires(client, mock_client, monkeypatch):
     assert client.post("/chat", json={"message": "hi"}).status_code == 200
 
 
-def _status_error(cls, code):
-    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    return cls("boom", response=httpx.Response(code, request=req), body=None)
+def _status_error(cls, code, body=None):
+    req = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    return cls("boom", response=httpx.Response(code, request=req), body=body)
 
 
 @pytest.mark.parametrize(
     "exc, expected",
     [
-        (anthropic.APIConnectionError(request=httpx.Request("POST", "https://x")), 503),
-        (anthropic.APITimeoutError(request=httpx.Request("POST", "https://x")), 503),
-        (_status_error(anthropic.RateLimitError, 429), 503),
-        (_status_error(anthropic.InternalServerError, 529), 503),
-        (_status_error(anthropic.InternalServerError, 500), 502),
-        (_status_error(anthropic.AuthenticationError, 401), 502),
+        (openai.APIConnectionError(request=httpx.Request("POST", "https://x")), 503),
+        (openai.APITimeoutError(request=httpx.Request("POST", "https://x")), 503),
+        (_status_error(openai.RateLimitError, 429), 503),
+        (_status_error(openai.RateLimitError, 429, {"code": "insufficient_quota"}), 502),
+        (_status_error(openai.InternalServerError, 503), 503),
+        (_status_error(openai.InternalServerError, 500), 502),
+        (_status_error(openai.AuthenticationError, 401), 502),
     ],
 )
-def test_anthropic_errors(client, mock_client, exc, expected):
-    mock_client.messages.create.side_effect = exc
+def test_openai_errors(client, mock_client, exc, expected):
+    mock_client.chat.completions.create.side_effect = exc
     r = client.post("/chat", json={"message": "hi"})
     assert r.status_code == expected
     assert "error" in r.get_json()
 
 
 def test_unexpected_exception_returns_json_500(client, mock_client):
-    mock_client.messages.create.side_effect = RuntimeError("kaboom")
+    mock_client.chat.completions.create.side_effect = RuntimeError("kaboom")
     r = client.post("/chat", json={"message": "hi"})
     assert r.status_code == 500
     assert r.get_json() == {"error": "Something went wrong on the server."}
@@ -211,4 +218,11 @@ def test_unexpected_exception_returns_json_500(client, mock_client):
 def test_oversized_body(client):
     r = client.post("/chat", data="x" * 70_000, content_type="application/json")
     assert r.status_code == 413
+    assert "error" in r.get_json()
+
+
+def test_empty_model_reply_is_502(client, mock_client):
+    mock_client.chat.completions.create.return_value = fake_response(None)
+    r = client.post("/chat", json={"message": "hi"})
+    assert r.status_code == 502
     assert "error" in r.get_json()

@@ -1,4 +1,4 @@
-"""Ask Atin: a small Flask backend that answers questions about Atin via the Claude API."""
+"""Ask Atin: a small Flask backend that answers questions about Atin via the OpenAI API."""
 
 import logging
 import os
@@ -7,7 +7,7 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 
-import anthropic
+import openai
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -21,7 +21,8 @@ log = logging.getLogger("ask-atin")
 
 # ---- Configuration ---------------------------------------------------------
 
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+# A non-reasoning model, so the whole token budget goes to the visible answer.
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 MAX_TOKENS = 400
 MAX_MESSAGE_CHARS = 1000
 MAX_HISTORY_ITEMS = 10
@@ -68,12 +69,12 @@ _client = None
 
 
 def get_client():
-    """Build the Anthropic client lazily so the app still boots (and /health works) without a key."""
+    """Build the OpenAI client lazily so the app still boots (and /health works) without a key."""
     global _client
     if _client is None:
         # Timeouts stay well under the frontend's 90 s abort and gunicorn's worker timeout.
-        _client = anthropic.Anthropic(
-            api_key=os.environ["ANTHROPIC_API_KEY"], timeout=30.0, max_retries=1
+        _client = openai.OpenAI(
+            api_key=os.environ["OPENAI_API_KEY"], timeout=30.0, max_retries=1
         )
     return _client
 
@@ -149,30 +150,40 @@ def chat():
     if len(message) > MAX_MESSAGE_CHARS:
         return error(f"Message is too long (max {MAX_MESSAGE_CHARS} characters).", 400)
 
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        log.error("ANTHROPIC_API_KEY is not set")
+    if not os.getenv("OPENAI_API_KEY"):
+        log.error("OPENAI_API_KEY is not set")
         return error("The server is missing its API key. Please try again later.", 500)
 
-    messages = clean_history(data.get("history")) + [{"role": "user", "content": message}]
+    messages = (
+        [{"role": "system", "content": SYSTEM_PROMPT}]
+        + clean_history(data.get("history"))
+        + [{"role": "user", "content": message}]
+    )
 
     try:
-        response = get_client().messages.create(
+        response = get_client().chat.completions.create(
             model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            max_completion_tokens=MAX_TOKENS,
             messages=messages,
         )
-    except (anthropic.APIConnectionError, anthropic.RateLimitError) as e:
+    except openai.RateLimitError as e:
+        # OpenAI also uses 429 for "out of credits"; that won't fix itself, so it's a 502.
+        if e.code == "insufficient_quota":
+            log.error("OpenAI account is out of quota")
+            return error("The AI service returned an error. Please try again later.", 502)
+        log.warning("OpenAI rate limited")
+        return error("The AI service is busy. Please try again shortly.", 503)
+    except openai.APIConnectionError as e:
         # APITimeoutError is a subclass of APIConnectionError.
-        log.warning("Anthropic unavailable: %s", type(e).__name__)
+        log.warning("OpenAI unreachable: %s", type(e).__name__)
         return error("The AI service is busy or unreachable. Please try again shortly.", 503)
-    except anthropic.APIStatusError as e:
-        log.error("Anthropic API error %s", e.status_code)
-        if e.status_code in (503, 529):
+    except openai.APIStatusError as e:
+        log.error("OpenAI API error %s", e.status_code)
+        if e.status_code == 503:
             return error("The AI service is overloaded. Please try again shortly.", 503)
         return error("The AI service returned an error. Please try again later.", 502)
 
-    reply = "".join(block.text for block in response.content if block.type == "text").strip()
+    reply = (response.choices[0].message.content or "").strip() if response.choices else ""
     if not reply:
         return error("The AI service returned an empty reply. Please try again.", 502)
     return jsonify({"reply": reply})

@@ -4,8 +4,8 @@
 
 | Tool | Model | Used for |
 |---|---|---|
-| Claude Code (Claude desktop app, Code tab) | Claude Opus 5.5 (`claude-opus-5-5`) | Writing the backend, frontend, tests, README, and deploy config; running tests; browser-testing the frontend |
-| Claude API (at runtime) | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | Answers visitors' questions in the deployed chatbot |
+| Claude Code (Claude desktop app, Code tab) | Claude Opus 5.5 (`claude-opus-5-5`) | Writing the backend, frontend, tests, README, and deploy config; running tests; browser-testing the frontend; switching the backend from Anthropic to OpenAI |
+| OpenAI API (at runtime) | `gpt-4.1-mini` (configurable via `OPENAI_MODEL`) | Answers visitors' questions in the deployed chatbot |
 
 ## Key prompts
 
@@ -37,14 +37,23 @@ Claude Code offered to ask 5 short questions about my background. My reply:
 
 Claude Code read `index.html` from the `atinm12/atinm12.github.io` repo and wrote `persona.md` using only facts stated on the site. Anything the site doesn't cover (class year, GPA, etc.) is explicitly marked as unknown so the bot says "I don't know" instead of guessing.
 
+### 3. Switching from Claude to OpenAI
+
+> I did an open AI API key. Is that fine instead of Claude?
+
+> change the code so that it works with OpenAI.
+
+Nothing in the graded requirements names a provider, so the backend now uses the `openai` SDK (Chat Completions) instead of `anthropic`. The API contract (`/chat`, `/health`, error shapes) and the frontend didn't change.
+
 ## Main decisions made during the build
 
 - **Guardrails in code, facts in `persona.md`.** `app.py` wraps `persona.md` with fixed instructions: answer only from the profile, say "I don't know" instead of guessing, decline off-topic requests, keep answers short and in plain text. `persona.md` stays pure facts that are easy to edit.
-- **The Anthropic client is created lazily** (`get_client()`), so the app boots and `/health` works even without a key, and tests can swap in a mock with one line.
-- **Error mapping:** connection errors, timeouts, and Anthropic 429/503/529 return **503** ("busy, try again"); any other Anthropic status error, or an empty reply, returns **502**. A catch-all handler turns any unexpected exception into a JSON 500, so the server never returns an HTML error page.
+- **The API client is created lazily** (`get_client()`), so the app boots and `/health` works even without a key, and tests can swap in a mock with one line.
+- **Error mapping:** connection errors, timeouts, and OpenAI 429/503 return **503** ("busy, try again"). OpenAI's 429 with code `insufficient_quota` (account out of credits) returns **502**, since retrying won't help. Any other OpenAI status error, or an empty reply, returns **502**. A catch-all handler turns any unexpected exception into a JSON 500, so the server never returns an HTML error page.
 - **Rate limiter:** a sliding window (a deque of timestamps per IP) guarded by a lock, applied to `/chat` only so `/health` wake-up pings don't use up the quota. `ProxyFix(x_for=1)` makes Flask see the real client IP behind Render's proxy.
 - **Extra abuse limits** beyond the spec: 64 KB request body cap (413), 4000 characters per history item.
-- **`gunicorn.conf.py`** keeps the start command exactly `gunicorn app:app` while setting 1 worker (the in-memory rate limiter must be shared), 4 threads, a 120 s timeout, and binding to Render's `$PORT`. The Anthropic client uses a 30 s timeout with 1 retry, which stays under both gunicorn's timeout and the frontend's 90 s abort.
+- **`gunicorn.conf.py`** keeps the start command exactly `gunicorn app:app` while setting 1 worker (the in-memory rate limiter must be shared), 4 threads, a 120 s timeout, and binding to Render's `$PORT`. The OpenAI client uses a 30 s timeout with 1 retry, which stays under both gunicorn's timeout and the frontend's 90 s abort.
 - **Local port 5001, not 5000:** on macOS, AirPlay Receiver listens on port 5000 and answered with a 403 after Flask stopped. That hid the "backend down" case during testing.
 - **Frontend:** failed sends put the text back in the textarea so it can be resent; `fetch` `TypeError` is treated as a network failure and `AbortError` as a timeout; the status line updates to "unreachable" or "online" after each request.
 - **Testing without a key:** the browser round-trip was run against the real `app.py` with only `get_client` stubbed, and the frontend was served from a scratch copy with `API_BASE` set to localhost, so the committed file keeps pointing at Render.
+- **Anthropic to OpenAI switch:** the key and model env vars are now `OPENAI_API_KEY` and `OPENAI_MODEL`, and the system prompt goes in as a `system` message. The call uses `max_completion_tokens=400` (OpenAI's current parameter name). The default model is `gpt-4.1-mini`, not a GPT-5 mini: GPT-5 models are reasoning models, and hidden reasoning tokens can use up a 400-token budget and leave an empty answer.

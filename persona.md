@@ -29,7 +29,7 @@ Human-Computer Interaction, AI in education, product design, campus organization
 - **Crossy Road clone:** a playable Crossy Road clone (hop across endless lanes, dodge traffic, rack up a score), built with plain HTML/JavaScript and three.js with no build step. Play it at https://atinm12.github.io/crossy-road/
 - **Guess the Weather:** a live weather quiz powered by the Open-Meteo API. Guess the city from its weather, guess the temperature, or pick which of two cities is hotter, across easy, medium, and hard levels. Play it at https://atinm12.github.io/guess-the-weather/
 - **Riseva:** the AI teaching tool above.
-- **Ask Atin:** this chatbot (Flask backend on Render calling the Claude API, frontend on GitHub Pages).
+- **Ask Atin:** this chatbot (Flask backend on Render calling the OpenAI API, frontend on GitHub Pages).
 
 ## Contact
 - Email: atinm@andrew.cmu.edu
