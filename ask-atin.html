@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ask Atin</title>
+  <meta name="description" content="Chat with a bot that answers questions about Atin.">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --text: #1b1f2a;
+      --muted: #5c6475;
+      --border: #dde1ea;
+      --accent: #3657d6;
+      --accent-text: #ffffff;
+      --bot-bubble: #eef0f6;
+      --error-bg: #fdecec;
+      --error-text: #9b1c1c;
+      --ok: #1f8a4c;
+      --warn: #b7791f;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #11141b;
+        --panel: #1a1e27;
+        --text: #e7e9ef;
+        --muted: #9aa3b5;
+        --border: #2c3240;
+        --accent: #6b8cff;
+        --accent-text: #0d1020;
+        --bot-bubble: #252a36;
+        --error-bg: #3a1d1f;
+        --error-text: #ffb4b4;
+        --ok: #4ade80;
+        --warn: #fbbf24;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    a { color: var(--accent); }
+    .status { font-size: 0.875rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); }
+    .status[data-state="online"] .dot { background: var(--ok); }
+    .status[data-state="offline"] .dot { background: var(--error-text); }
+    .intro { margin: 0; color: var(--muted); }
+    #chat {
+      flex: 1;
+      min-height: 300px;
+      overflow-y: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .user { align-self: flex-end; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 4px; }
+    .bot { align-self: flex-start; background: var(--bot-bubble); border-bottom-left-radius: 4px; }
+    .error { align-self: flex-start; background: var(--error-bg); color: var(--error-text); border-bottom-left-radius: 4px; }
+    .typing { color: var(--muted); font-style: italic; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .chip:hover { border-color: var(--accent); }
+    form { display: flex; gap: 8px; align-items: flex-end; }
+    textarea {
+      flex: 1;
+      resize: vertical;
+      min-height: 48px;
+      max-height: 200px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+    }
+    textarea:focus, .chip:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button[type="submit"] {
+      padding: 12px 18px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent);
+      color: var(--accent-text);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Ask Atin</h1>
+      <a href="https://atinm12.github.io/">&larr; Back to portfolio</a>
+    </header>
+    <p class="intro">Ask me anything about Atin's background, projects, and interests. Answers come from an AI (Claude) and may be imperfect.</p>
+    <div class="status" id="status" data-state="waking" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span><span id="status-text">Checking server&hellip;</span>
+    </div>
+
+    <div id="chat" aria-live="polite"></div>
+
+    <div class="chips" id="chips">
+      <button type="button" class="chip">What is Atin studying?</button>
+      <button type="button" class="chip">What projects has Atin built?</button>
+      <button type="button" class="chip">What are Atin's technical skills?</button>
+      <button type="button" class="chip">How can I contact Atin?</button>
+    </div>
+
+    <form id="form">
+      <textarea id="input" rows="2" maxlength="1000" placeholder="Ask a question about Atin&hellip;" aria-label="Your question"></textarea>
+      <button type="submit" id="send">Send</button>
+    </form>
+    <p class="hint">Enter to send &middot; Shift+Enter for a new line &middot; max 1000 characters</p>
+  </main>
+
+  <script>
+    // Backend base URL (no trailing slash).
+    // For local testing, run the Flask server (`python app.py`, port 5001) and switch this to:
+    //   const API_BASE = "http://127.0.0.1:5001";
+    // Switch it back to the Render URL before pushing to GitHub Pages.
+    const API_BASE = "https://ask-atin-backend.onrender.com";
+
+    const MAX_CHARS = 1000;
+    const TIMEOUT_MS = 90_000; // Render's free tier can take ~1 min to wake up
+
+    const chatEl = document.getElementById("chat");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+    const statusText = document.getElementById("status-text");
+
+    // Conversation so far, sent with each request as {role, content} items.
+    const history = [];
+    let busy = false;
+
+    // Always textContent (never innerHTML) so model output can't inject markup.
+    function addBubble(text, kind) {
+      const div = document.createElement("div");
+      div.className = `bubble ${kind}`;
+      div.textContent = text;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+      return div;
+    }
+
+    function setStatus(state, text) {
+      statusEl.dataset.state = state;
+      statusText.textContent = text;
+    }
+
+    // Ping /health on load: wakes the Render instance and tells the visitor what's going on.
+    async function checkHealth() {
+      setStatus("waking", "Waking up the server (this can take up to a minute)…");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const res = await fetch(`${API_BASE}/health`, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setStatus("online", "Server online");
+      } catch {
+        setStatus("offline", "Server unreachable. It may be waking up; try sending a message.");
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function sendMessage(raw) {
+      if (busy) return;
+      const message = raw.trim();
+
+      // Validate before any request is sent.
+      if (!message) {
+        addBubble("Please type a question first.", "error");
+        return;
+      }
+      if (message.length > MAX_CHARS) {
+        addBubble(`Your message is too long (max ${MAX_CHARS} characters).`, "error");
+        return;
+      }
+
+      busy = true;
+      sendBtn.disabled = true;
+      input.value = "";
+      addBubble(message, "user");
+      const typing = addBubble("Thinking…", "bot typing");
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+      try {
+        const res = await fetch(`${API_BASE}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, history }),
+          signal: controller.signal,
+        });
+
+        let data = null;
+        try { data = await res.json(); } catch { /* non-JSON response */ }
+
+        if (!res.ok || !data || typeof data.reply !== "string") {
+          const msg = (data && data.error) || `The server returned an unexpected response (HTTP ${res.status}).`;
+          throw new Error(msg);
+        }
+
+        typing.remove();
+        addBubble(data.reply, "bot");
+        history.push({ role: "user", content: message }, { role: "assistant", content: data.reply });
+        setStatus("online", "Server online");
+      } catch (err) {
+        typing.remove();
+        if (err.name === "AbortError") {
+          addBubble(`The server took too long to respond (${TIMEOUT_MS / 1000} s). Please try again.`, "error");
+        } else if (err instanceof TypeError) {
+          // fetch() throws TypeError on network failure / CORS / server down.
+          addBubble("Couldn't reach the server. It may be down or waking up. Please try again in a moment.", "error");
+          setStatus("offline", "Server unreachable");
+        } else {
+          addBubble(err.message, "error");
+        }
+        input.value = input.value || message; // give the text back so it can be resent
+      } finally {
+        clearTimeout(timer);
+        busy = false;
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      sendMessage(input.value);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        sendMessage(input.value);
+      }
+    });
+
+    document.getElementById("chips").addEventListener("click", (e) => {
+      if (e.target.classList.contains("chip")) sendMessage(e.target.textContent);
+    });
+
+    addBubble("Hi! I'm a chatbot that can answer questions about Atin. What would you like to know?", "bot");
+    checkHealth();
+  </script>
+</body>
+</html>
