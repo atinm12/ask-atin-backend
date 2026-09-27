@@ -45,6 +45,18 @@ Claude Code read `index.html` from the `atinm12/atinm12.github.io` repo and wrot
 
 Nothing in the graded requirements names a provider, so the backend now uses the `openai` SDK (Chat Completions) instead of `anthropic`. The API contract (`/chat`, `/health`, error shapes) and the frontend didn't change.
 
+### 4. Deploy and portfolio
+
+> push. make sure to hide api keys that keep to be hidden
+
+> when i ask a question, it says its missing the key.
+
+> are all requirements met: (pasted the assignment's requirements)
+
+- Claude Code copied `ask-atin.html` into my portfolio repo, added an "Ask Atin" card to the Projects section, and pushed only after scanning both repos (and their full git history) for API keys.
+- I deployed on Render myself. The first chat failed with "missing its API key" because `OPENAI_API_KEY` wasn't set in Render's Environment tab; setting it and redeploying fixed it.
+- Verified live on 2026-09-27: `/health` returned 200, a real `/chat` returned a correct answer, and an empty `/chat` returned a JSON 400.
+
 ## Main decisions made during the build
 
 - **Guardrails in code, facts in `persona.md`.** `app.py` wraps `persona.md` with fixed instructions: answer only from the profile, say "I don't know" instead of guessing, decline off-topic requests, keep answers short and in plain text. `persona.md` stays pure facts that are easy to edit.

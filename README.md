@@ -2,8 +2,9 @@
 
 A small Flask API behind the **Ask Atin** chatbot on my portfolio. Visitors type questions about me on a GitHub Pages page; this backend forwards them to the OpenAI API with a system prompt built from [`persona.md`](persona.md) and returns the answer as JSON.
 
-- **Live backend:** https://ask-atin-backend.onrender.com  <!-- TODO: replace with the real Render URL -->
-- **Frontend:** https://atinm12.github.io/ask-atin.html  <!-- TODO: confirm path once added to the portfolio -->
+- **Live backend:** https://ask-atin-backend.onrender.com
+- **Frontend (live):** https://atinm12.github.io/ask-atin.html, also linked from the Projects section of https://atinm12.github.io
+- **Frontend repo:** https://github.com/atinm12/atinm12.github.io (`ask-atin.html`; this repo keeps an identical copy for local testing)
 - **Stack:** Python 3.10+, Flask, flask-cors, OpenAI Python SDK, gunicorn, Render (free tier)
 
 ## Endpoints
